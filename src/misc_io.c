@@ -54,6 +54,7 @@ struct misc_dev {
     int thread_started;
 
     misc_cb_t cb;
+    void *cb_args;
 
     /* last known raw value (0/1), and debounce bookkeeping */
     int last_raw;
@@ -216,6 +217,7 @@ static void *trigger_thread_fn(void *arg)
         int running = dev->running;
         uint16_t debounce_ms = dev->debounce_ms;
         misc_cb_t cb = dev->cb;
+        void *cb_args = dev->cb_args;
         pthread_mutex_unlock(&dev->lock);
 
         if (!running)
@@ -246,9 +248,8 @@ static void *trigger_thread_fn(void *arg)
         }
         pthread_mutex_unlock(&dev->lock);
 
-        if (do_cb && raw_now == dev->active_logic) {
-            /* args in API exists; we don't have extra args in misc_dev, pass NULL */
-            cb(dev, me, NULL);
+        if (do_cb) {
+            cb(dev, me, cb_args);
         }
 
         usleep(poll_interval_ms * 1000);
@@ -293,9 +294,8 @@ static void *trigger_thread_fn(void *arg)
         }
         pthread_mutex_unlock(&dev->lock);
 
-        if (do_cb && raw_now == dev->active_logic) {
-            /* args in API exists; we don't have extra args in misc_dev, pass NULL */
-            cb(dev, me, NULL);
+        if (do_cb) {
+            cb(dev, me, cb_args);
         }
 #endif
     }
@@ -325,16 +325,12 @@ struct misc_dev *misc_io_alloc(enum misc_type type, enum misc_dir dir, void *hw_
     pthread_mutex_init(&dev->lock, NULL);
 
 #if defined(LIBGPIOD_V2)
-    char chip_name[20] = {0};
-    for (int i = 0; i < 4; i++) {
-        if (ctx->line_offset >= i * 32 && ctx->line_offset < (i + 1) * 32) {
-            dev->offset = ctx->line_offset - i * 32;
-            snprintf(chip_name, sizeof(chip_name), "/dev/gpiochip%d", i);
-            break;
-        }
+    dev->offset = ctx->line_offset;
+    if (ctx->chip_name[0] == '/') {
+        dev->chip = gpiod_chip_open(ctx->chip_name);
+    } else {
+        dev->chip = gpiod_chip_open_lookup(ctx->chip_name);
     }
-    printf("gpio_index=%d, offset=%d, chip_name=%s\n", ctx->line_offset, dev->offset, chip_name);
-    dev->chip  = gpiod_chip_open(chip_name);
 #else
     dev->chip = gpiod_chip_open_by_name(ctx->chip_name);
 #endif
@@ -433,13 +429,14 @@ int misc_io_get(struct misc_dev *dev)
     return (raw == active_raw) ? 1 : 0;
 }
 
-void misc_io_trigger(struct misc_dev *dev, misc_cb_t cb)
+void misc_io_trigger(struct misc_dev *dev, misc_cb_t cb, void *args)
 {
     if (!dev)
         return;
 
     pthread_mutex_lock(&dev->lock);
     dev->cb = cb;
+    dev->cb_args = args;
 
     /* Only meaningful for input lines */
     if (dev->dir != MISC_DIR_INPUT) {

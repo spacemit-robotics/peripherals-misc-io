@@ -34,7 +34,7 @@ int test_trigger(void)
     }
 
     misc_io_config(dev, MISC_ACTIVE_HIGH, 50/*debounce ms*/);
-    misc_io_trigger(dev, cb);
+    misc_io_trigger(dev, cb, NULL);
 
     /* do something */
     while (1) {

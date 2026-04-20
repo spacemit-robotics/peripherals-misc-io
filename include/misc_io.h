@@ -63,8 +63,8 @@ int misc_io_set(struct misc_dev *dev, bool active);
 /* input API */
 int misc_io_get(struct misc_dev *dev);
 
-/* state machine tick (call at 10Hz~100Hz) */
-void misc_io_trigger(struct misc_dev *dev, misc_cb_t cb);
+/* start input monitoring and invoke cb on debounced state changes */
+void misc_io_trigger(struct misc_dev *dev, misc_cb_t cb, void *args);
 
 /* free device */
 void misc_io_free(struct misc_dev *dev);
