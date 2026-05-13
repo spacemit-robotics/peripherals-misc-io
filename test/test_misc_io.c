@@ -4,6 +4,7 @@
  */
 #include <misc_io.h>
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,20 +12,25 @@
 
 static volatile int g_count = 0;
 
-static void cb(struct misc_dev *dev, enum misc_event ev, void *args)
+static void cb(struct misc_dev *dev, enum misc_event ev, uint64_t timestamp_us, void *args)
 {
     (void)dev;
     (void)args;
     g_count++;
-    printf("[cb] count=%d ev=%s\n", g_count, (ev == MISC_EV_ACTIVE) ? "ACTIVE" : "INACTIVE");
+    if (ev != MISC_EV_ACTIVE)
+        return;
+
+    printf("[cb] count=%d ev=%s timestamp_us=%" PRIu64 "\n",
+        g_count, (ev == MISC_EV_ACTIVE) ? "ACTIVE" : "INACTIVE",
+        timestamp_us);
     fflush(stdout);
 }
 
 int test_trigger(void)
 {
     struct misc_gpiod_ctx ctx = {
-        .chip_name = "gpiochip0",
-        .line_offset = 9,
+        .chip_name = "gpiochip2",
+        .line_offset = 19,
     };
 
     struct misc_dev *dev = misc_io_alloc(MISC_TYPE_GENERIC, MISC_DIR_INPUT, &ctx);
@@ -33,7 +39,7 @@ int test_trigger(void)
         return 1;
     }
 
-    misc_io_config(dev, MISC_ACTIVE_HIGH, 50/*debounce ms*/);
+    misc_io_config(dev, MISC_ACTIVE_HIGH, 0/*debounce ms*/);
     misc_io_trigger(dev, cb, NULL);
 
     /* do something */

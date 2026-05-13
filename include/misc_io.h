@@ -49,7 +49,8 @@ struct misc_gpiod_ctx {
 struct misc_dev; /* opaque handle */
 
 /* callback function */
-typedef void (*misc_cb_t)(struct misc_dev *dev, enum misc_event ev, void *args);
+typedef void (*misc_cb_t)(struct misc_dev *dev, enum misc_event ev,
+    uint64_t timestamp_us, void *args);
 
 /* allocate device */
 struct misc_dev *misc_io_alloc(enum misc_type type, enum misc_dir dir, void *hw_ctx);

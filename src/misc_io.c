@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -20,8 +21,17 @@
 static uint64_t now_ms_monotonic(void)
 {
     struct timespec ts;
+
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+}
+
+static uint64_t get_timestamp_us(void)
+{
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+    return (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec;
 }
 
 static enum misc_event value_to_event(struct misc_dev *dev, int raw_value);
@@ -66,13 +76,28 @@ struct misc_dev {
 static int request_line_common(struct misc_dev *dev,
     const char *consumer,
     enum gpiod_line_direction direction,
-    enum gpiod_line_value default_value)
+    enum gpiod_line_value default_value,
+    enum gpiod_line_edge edge)
 {
     dev->settings = gpiod_line_settings_new();
     if (!dev->settings)
         return -ENOMEM;
 
     gpiod_line_settings_set_direction(dev->settings, direction);
+    if (direction == GPIOD_LINE_DIRECTION_INPUT) {
+        if (gpiod_line_settings_set_edge_detection(dev->settings, edge) < 0) {
+            gpiod_line_settings_free(dev->settings);
+            dev->settings = NULL;
+            return -errno;
+        }
+        if (edge != GPIOD_LINE_EDGE_NONE &&
+                gpiod_line_settings_set_event_clock(dev->settings,
+                    GPIOD_LINE_CLOCK_MONOTONIC) < 0) {
+            gpiod_line_settings_free(dev->settings);
+            dev->settings = NULL;
+            return -errno;
+        }
+    }
     if (direction == GPIOD_LINE_DIRECTION_OUTPUT)
         gpiod_line_settings_set_output_value(dev->settings, default_value);
 
@@ -120,20 +145,22 @@ static int request_line_input_events(struct misc_dev *dev, const char *consumer)
 {
     return request_line_common(dev, consumer,
         GPIOD_LINE_DIRECTION_INPUT,
-        GPIOD_LINE_VALUE_INACTIVE);
+        GPIOD_LINE_VALUE_INACTIVE,
+        GPIOD_LINE_EDGE_BOTH);
 }
 
 static int request_line_input(struct misc_dev *dev, const char *consumer)
 {
     return request_line_common(dev, consumer,
         GPIOD_LINE_DIRECTION_INPUT,
-        GPIOD_LINE_VALUE_INACTIVE);
+        GPIOD_LINE_VALUE_INACTIVE,
+        GPIOD_LINE_EDGE_NONE);
 }
 
 static int request_line_output(struct misc_dev *dev, const char *consumer, int default_value)
 {
     enum gpiod_line_value v = default_value ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE;
-    return request_line_common(dev, consumer, GPIOD_LINE_DIRECTION_OUTPUT, v);
+    return request_line_common(dev, consumer, GPIOD_LINE_DIRECTION_OUTPUT, v, GPIOD_LINE_EDGE_NONE);
 }
 #else
 static int request_line_input_events(struct misc_dev *dev, const char *consumer)
@@ -198,6 +225,46 @@ static enum misc_event value_to_event(struct misc_dev *dev, int raw_value)
     return (raw_value == active_raw) ? MISC_EV_ACTIVE : MISC_EV_INACTIVE;
 }
 
+#if defined(LIBGPIOD_V2)
+static int edge_event_to_raw_value(struct gpiod_edge_event *event)
+{
+    enum gpiod_edge_event_type type = gpiod_edge_event_get_event_type(event);
+
+    if (type == GPIOD_EDGE_EVENT_RISING_EDGE)
+        return 1;
+    if (type == GPIOD_EDGE_EVENT_FALLING_EDGE)
+        return 0;
+
+    return -EINVAL;
+}
+
+static uint64_t edge_event_to_timestamp_us(struct gpiod_edge_event *event)
+{
+    // uint64_t timestamp_ns = gpiod_edge_event_get_timestamp_ns(event);
+    // return timestamp_ns ? timestamp_ns / 1000ULL : get_timestamp_us();
+    return get_timestamp_us();
+}
+#else
+static int edge_event_to_raw_value(const struct gpiod_line_event *event)
+{
+    if (event->event_type == GPIOD_LINE_EVENT_RISING_EDGE)
+        return 1;
+    if (event->event_type == GPIOD_LINE_EVENT_FALLING_EDGE)
+        return 0;
+
+    return -EINVAL;
+}
+
+static uint64_t edge_event_to_timestamp_us(const struct gpiod_line_event *event)
+{
+    // uint64_t timestamp_us = (uint64_t)event->ts.tv_sec * 1000000ULL +
+    //     (uint64_t)event->ts.tv_nsec / 1000ULL;
+
+    // return timestamp_us ? timestamp_us : get_timestamp_us();
+    return get_timestamp_us();
+}
+#endif
+
 static struct gpiod_chip *open_gpiochip_compat(const char *chip_name)
 {
     if (!chip_name || chip_name[0] == '\0') {
@@ -244,7 +311,9 @@ static void *trigger_thread_fn(void *arg)
     pthread_mutex_unlock(&dev->lock);
 
 #if defined(LIBGPIOD_V2)
-    const uint64_t poll_interval_ms = 10;
+    struct gpiod_edge_event_buffer *event_buffer = gpiod_edge_event_buffer_new(16);
+    if (!event_buffer)
+        return NULL;
 #endif
 
     while (1) {
@@ -259,35 +328,51 @@ static void *trigger_thread_fn(void *arg)
             break;
 
 #if defined(LIBGPIOD_V2)
-        int raw_now = read_raw_value(dev);
-        if (raw_now < 0) {
-            usleep(poll_interval_ms * 1000);
+        int ret = gpiod_line_request_wait_edge_events(dev->req, 1000000000LL);
+        if (ret < 0) {
+            /* error, keep looping but allow exit */
+            continue;
+        }
+        if (ret == 0) {
+            /* timeout */
             continue;
         }
 
-        uint64_t tnow = now_ms_monotonic();
+        int event_count = gpiod_line_request_read_edge_events(dev->req, event_buffer, 16);
+        if (event_count < 0)
+            continue;
 
-        /* Debounce: ignore transitions within debounce window */
-        int do_cb = 0;
-        enum misc_event me = MISC_EV_INACTIVE;
+        for (int i = 0; i < event_count; i++) {
+            struct gpiod_edge_event *edge = gpiod_edge_event_buffer_get_event(event_buffer, i);
+            if (!edge)
+                continue;
 
-        pthread_mutex_lock(&dev->lock);
-        if (dev->last_raw != raw_now) {
-            uint64_t dt = tnow - dev->last_change_ms;
-            if (debounce_ms == 0 || dt >= (uint64_t)debounce_ms) {
-                dev->last_raw = raw_now;
-                dev->last_change_ms = tnow;
-                do_cb = (cb != NULL);
-                me = value_to_event(dev, raw_now);
+            uint64_t timestamp_us = edge_event_to_timestamp_us(edge);
+            uint64_t tnow = now_ms_monotonic();
+            int raw_now = edge_event_to_raw_value(edge);
+            if (raw_now < 0)
+                continue;
+
+            /* Debounce: ignore transitions within debounce window */
+            int do_cb = 0;
+            enum misc_event me = MISC_EV_INACTIVE;
+
+            pthread_mutex_lock(&dev->lock);
+            if (dev->last_raw != raw_now) {
+                uint64_t dt = tnow - dev->last_change_ms;
+                if (debounce_ms == 0 || dt >= (uint64_t)debounce_ms) {
+                    dev->last_raw = raw_now;
+                    dev->last_change_ms = tnow;
+                    do_cb = (cb != NULL);
+                    me = value_to_event(dev, raw_now);
+                }
+            }
+            pthread_mutex_unlock(&dev->lock);
+
+            if (do_cb) {
+                cb(dev, me, timestamp_us, cb_args);
             }
         }
-        pthread_mutex_unlock(&dev->lock);
-
-        if (do_cb) {
-            cb(dev, me, cb_args);
-        }
-
-        usleep(poll_interval_ms * 1000);
 #else
         /* Wait for an edge event with timeout, so we can exit promptly */
         struct timespec timeout;
@@ -309,9 +394,11 @@ static void *trigger_thread_fn(void *arg)
             continue;
         }
 
-        /* Read current stable value immediately after edge */
-        int raw_now = read_raw_value(dev);
+        uint64_t timestamp_us = edge_event_to_timestamp_us(&ev);
         uint64_t tnow = now_ms_monotonic();
+        int raw_now = edge_event_to_raw_value(&ev);
+        if (raw_now < 0)
+            continue;
 
         /* Debounce: ignore transitions within debounce window */
         int do_cb = 0;
@@ -330,10 +417,14 @@ static void *trigger_thread_fn(void *arg)
         pthread_mutex_unlock(&dev->lock);
 
         if (do_cb) {
-            cb(dev, me, cb_args);
+            cb(dev, me, timestamp_us, cb_args);
         }
 #endif
     }
+
+#if defined(LIBGPIOD_V2)
+    gpiod_edge_event_buffer_free(event_buffer);
+#endif
 
     return NULL;
 }
