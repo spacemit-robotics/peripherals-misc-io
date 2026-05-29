@@ -1,0 +1,36 @@
+## Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
+## SPDX-License-Identifier: Apache-2.0
+
+module: components/peripherals/misc_io
+
+tests:
+  - name: misc-io-api-functional
+    description: Verifies GPIO input/output active logic, set/get behavior, and output trigger no-op with fake gpiod.
+    category: functional
+    scopes: [pr, scheduled]
+    timeout_s: 120
+    workdir: sdk
+    command: |
+      bash components/peripherals/misc_io/tests/test_misc_io_api_contract.sh functional
+
+  - name: misc-io-api-error-paths
+    description: Verifies null context, invalid chip, null device, and invalid set/get error handling.
+    category: functional
+    scopes: [pr, scheduled]
+    timeout_s: 120
+    workdir: sdk
+    command: |
+      bash components/peripherals/misc_io/tests/test_misc_io_api_contract.sh error-paths
+
+  - name: misc-io-gpio-hardware-smoke
+    description: Manually verifies a real GPIO input emits at least one debounced callback event.
+    category: functional
+    scopes: [manual]
+    timeout_s: 180
+    workdir: sdk
+    requires:
+      hardware:
+        - GPIO input matching misc_io/test/test_misc_io.c, toggled by an operator.
+      supervision: true
+    command: |
+      bash components/peripherals/misc_io/tests/test_hw_misc_io_smoke.sh
