@@ -30,7 +30,7 @@ tests:
     workdir: sdk
     requires:
       hardware:
-        - GPIO input matching misc_io/test/test_misc_io.c, toggled by an operator.
+        - GPIO input matching misc_io/example/test_misc_io.c, toggled by an operator.
       supervision: true
     command: |
       bash components/peripherals/misc_io/tests/test_hw_misc_io_smoke.sh

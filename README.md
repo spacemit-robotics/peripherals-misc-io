@@ -37,7 +37,7 @@ make -j
 sudo ./build/test_misc_io
 ```
 说明：
-- 示例默认监听 `gpiochip0` 的 `line_offset=9`，请根据硬件修改 `test/test_misc_io.c`。
+- 示例默认监听 `gpiochip0` 的 `line_offset=9`，请根据硬件修改 `example/test_misc_io.c`。
 - k3的gpio参数配置采用chip+line_offset，比如GPIO83, 对应的输入为chip_name = gpiochip2;line_offset=19。（每个chip有32线）
 - 而对于k1，则只有gpiochip0，比如GPIO113, 对应的输入为gpiochip0， 113。
 - 如需测试输出或轮询读取，可切换 `main()` 中的 `test_set_io()` 或 `test_get_io()`。

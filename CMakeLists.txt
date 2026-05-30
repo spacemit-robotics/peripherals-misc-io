@@ -40,11 +40,11 @@ install(TARGETS misc_io
 )
 install(FILES include/misc_io.h DESTINATION include)
 
-# ---- tests ----
-option(BUILD_TESTS "Build test programs" OFF)
+# ---- examples ----
+option(BUILD_TESTS "Build example programs" OFF)
 if(BUILD_TESTS)
     add_executable(test_misc_io
-        test/test_misc_io.c
+        example/test_misc_io.c
     )
     target_link_libraries(test_misc_io PRIVATE misc_io)
     set_target_properties(test_misc_io PROPERTIES BUILD_RPATH "$ORIGIN/../lib")
