@@ -37,10 +37,17 @@ make -j
 sudo ./build/test_misc_io
 ```
 说明：
-- 示例默认监听 `gpiochip0` 的 `line_offset=9`，请根据硬件修改 `example/test_misc_io.c`。
+- 示例支持命令行指定模式、GPIO 芯片和线号：
+  ```bash
+  sudo ./build/test_misc_io [trigger|get|set] [chip_name] [line_offset]
+  ```
+- 默认值为：`trigger gpiochip2 19`、`get gpiochip0 61`、`set gpiochip0 9`。
 - k3的gpio参数配置采用chip+line_offset，比如GPIO83, 对应的输入为chip_name = gpiochip2;line_offset=19。（每个chip有32线）
-- 而对于k1，则只有gpiochip0，比如GPIO113, 对应的输入为gpiochip0， 113。
-- 如需测试输出或轮询读取，可切换 `main()` 中的 `test_set_io()` 或 `test_get_io()`。
+- 对于 K1，例如 GPIO113 可使用：
+  ```bash
+  sudo ./build/test_misc_io trigger gpiochip0 113
+  ```
+- `line_offset` 必须是有效的非负整数，支持十进制和 `0x` 开头的十六进制，不接受八进制写法。
 
 ## 详细使用
 保留，引用到后续的官方文档。
