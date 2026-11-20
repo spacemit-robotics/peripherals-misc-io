@@ -26,11 +26,11 @@ static void cb(struct misc_dev *dev, enum misc_event ev, uint64_t timestamp_us, 
     fflush(stdout);
 }
 
-int test_trigger(void)
+int test_trigger(const char *chip, unsigned int line)
 {
     struct misc_gpiod_ctx ctx = {
-        .chip_name = "gpiochip2",
-        .line_offset = 19,
+        .chip_name = chip,
+        .line_offset = line,
     };
 
     struct misc_dev *dev = misc_io_alloc(MISC_TYPE_GENERIC, MISC_DIR_INPUT, &ctx);
@@ -51,11 +51,11 @@ int test_trigger(void)
 }
 
 
-int test_get_io(void)
+int test_get_io(const char *chip, unsigned int line)
 {
     struct misc_gpiod_ctx ctx = {
-        .chip_name = "gpiochip0",
-        .line_offset = 61,
+        .chip_name = chip,
+        .line_offset = line,
     };
 
     struct misc_dev *dev = misc_io_alloc(MISC_TYPE_GENERIC, MISC_DIR_INPUT, &ctx);
@@ -74,11 +74,11 @@ int test_get_io(void)
     misc_io_free(dev);
 }
 
-int test_set_io(void)
+int test_set_io(const char *chip, unsigned int line)
 {
     struct misc_gpiod_ctx ctx = {
-        .chip_name = "gpiochip0",
-        .line_offset = 9,
+        .chip_name = chip,
+        .line_offset = line,
     };
 
     struct misc_dev *dev = misc_io_alloc(MISC_TYPE_GENERIC, MISC_DIR_OUTPUT, &ctx);
@@ -99,13 +99,39 @@ int test_set_io(void)
     misc_io_free(dev);
 }
 
+/*
+ * 用法: test_misc_io [trigger|get|set] [chip_name] [line_offset]
+ * 默认: trigger gpiochip2 19；get gpiochip0 61；set gpiochip0 9
+ * MUSE Pi Pro 只有 gpiochip0，line_offset 即 GPIO 编号，例如: test_misc_io trigger gpiochip0 113
+ */
 int main(int argc, char **argv)
 {
-    test_trigger();
+    const char *mode = (argc >= 2) ? argv[1] : "trigger";
+    const char *chip = NULL;
+    unsigned int line = 0;
 
-    // test_set_io();
+    if (strcmp(mode, "trigger") == 0) {
+        chip = "gpiochip2";
+        line = 19;
+    } else if (strcmp(mode, "get") == 0) {
+        chip = "gpiochip0";
+        line = 61;
+    } else if (strcmp(mode, "set") == 0) {
+        chip = "gpiochip0";
+        line = 9;
+    } else {
+        fprintf(stderr, "usage: %s [trigger|get|set] [chip_name] [line_offset]\n", argv[0]);
+        return 1;
+    }
 
-    // test_get_io();
+    if (argc >= 3)
+        chip = argv[2];
+    if (argc >= 4)
+        line = (unsigned int)strtoul(argv[3], NULL, 0);
 
-    return 0;
+    if (strcmp(mode, "trigger") == 0)
+        return test_trigger(chip, line);
+    if (strcmp(mode, "get") == 0)
+        return test_get_io(chip, line);
+    return test_set_io(chip, line);
 }
