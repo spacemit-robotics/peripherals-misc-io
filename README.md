@@ -47,7 +47,7 @@ sudo ./build/test_misc_io
   ```bash
   sudo ./build/test_misc_io trigger gpiochip0 113
   ```
-- `line_offset` 必须是有效的非负整数，支持十进制和 `0x` 开头的十六进制。
+- `line_offset` 必须是有效的非负整数，支持十进制和 `0x` 开头的十六进制，不接受八进制写法。
 
 ## 详细使用
 保留，引用到后续的官方文档。

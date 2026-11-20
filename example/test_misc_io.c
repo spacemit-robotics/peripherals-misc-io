@@ -4,6 +4,7 @@
  */
 #include <misc_io.h>
 
+#include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -16,15 +17,30 @@ static volatile int g_count = 0;
 
 static int parse_line_offset(const char *text, unsigned int *line)
 {
+    const char *digits = text;
     char *end = NULL;
     unsigned long parsed;
+    int base = 10;
 
-    if (!text || !*text || !line || text[0] == '-')
+    if (!text || !*text || !line)
         return -1;
 
+    if (text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
+        digits += 2;
+        base = 16;
+    }
+    if (!*digits)
+        return -1;
+
+    for (const char *p = digits; *p; ++p) {
+        if (base == 10 ? !isdigit((unsigned char)*p) :
+            !isxdigit((unsigned char)*p))
+            return -1;
+    }
+
     errno = 0;
-    parsed = strtoul(text, &end, 0);
-    if (errno == ERANGE || end == text || *end != '\0' ||
+    parsed = strtoul(digits, &end, base);
+    if (errno == ERANGE || end == digits || *end != '\0' ||
         parsed > UINT_MAX)
         return -1;
 
@@ -68,6 +84,7 @@ int test_trigger(const char *chip, unsigned int line)
     }
 
     misc_io_free(dev);
+    return 0;
 }
 
 
@@ -87,11 +104,17 @@ int test_get_io(const char *chip, unsigned int line)
     int get_value = 0;
     for (int i = 0; i < 50; i++) {
         get_value = misc_io_get(dev);
+        if (get_value < 0) {
+            fprintf(stderr, "misc_io_get failed: %d\n", get_value);
+            misc_io_free(dev);
+            return 1;
+        }
         printf("get_value:%d\n", get_value);
         sleep(1);
     }
 
     misc_io_free(dev);
+    return 0;
 }
 
 int test_set_io(const char *chip, unsigned int line)
@@ -108,15 +131,28 @@ int test_set_io(const char *chip, unsigned int line)
     }
 
     for (int i = 0; i < 10; i++) {
-        printf("set hight \n");
-        misc_io_set(dev, MISC_ACTIVE_HIGH);
+        int ret;
+
+        printf("set high\n");
+        ret = misc_io_set(dev, MISC_ACTIVE_HIGH);
+        if (ret != 0) {
+            fprintf(stderr, "misc_io_set high failed: %d\n", ret);
+            misc_io_free(dev);
+            return 1;
+        }
         sleep(2);
-        printf("set low \n");
-        misc_io_set(dev, MISC_ACTIVE_LOW);
+        printf("set low\n");
+        ret = misc_io_set(dev, MISC_ACTIVE_LOW);
+        if (ret != 0) {
+            fprintf(stderr, "misc_io_set low failed: %d\n", ret);
+            misc_io_free(dev);
+            return 1;
+        }
         sleep(2);
     }
 
     misc_io_free(dev);
+    return 0;
 }
 
 /*
