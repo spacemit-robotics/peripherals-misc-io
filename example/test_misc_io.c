@@ -4,13 +4,33 @@
  */
 #include <misc_io.h>
 
+#include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 static volatile int g_count = 0;
+
+static int parse_line_offset(const char *text, unsigned int *line)
+{
+    char *end = NULL;
+    unsigned long parsed;
+
+    if (!text || !*text || !line || text[0] == '-')
+        return -1;
+
+    errno = 0;
+    parsed = strtoul(text, &end, 0);
+    if (errno == ERANGE || end == text || *end != '\0' ||
+        parsed > UINT_MAX)
+        return -1;
+
+    *line = (unsigned int)parsed;
+    return 0;
+}
 
 static void cb(struct misc_dev *dev, enum misc_event ev, uint64_t timestamp_us, void *args)
 {
@@ -102,13 +122,20 @@ int test_set_io(const char *chip, unsigned int line)
 /*
  * 用法: test_misc_io [trigger|get|set] [chip_name] [line_offset]
  * 默认: trigger gpiochip2 19；get gpiochip0 61；set gpiochip0 9
- * MUSE Pi Pro 只有 gpiochip0，line_offset 即 GPIO 编号，例如: test_misc_io trigger gpiochip0 113
+ * MUSE Pi Pro 只有 gpiochip0，line_offset 即 GPIO 编号，例如:
+ * test_misc_io trigger gpiochip0 113
  */
 int main(int argc, char **argv)
 {
     const char *mode = (argc >= 2) ? argv[1] : "trigger";
     const char *chip = NULL;
     unsigned int line = 0;
+
+    if (argc > 4) {
+        fprintf(stderr, "usage: %s [trigger|get|set] [chip_name] [line_offset]\n",
+            argv[0]);
+        return 2;
+    }
 
     if (strcmp(mode, "trigger") == 0) {
         chip = "gpiochip2";
@@ -126,8 +153,11 @@ int main(int argc, char **argv)
 
     if (argc >= 3)
         chip = argv[2];
-    if (argc >= 4)
-        line = (unsigned int)strtoul(argv[3], NULL, 0);
+    if (argc >= 4 && parse_line_offset(argv[3], &line) != 0) {
+        fprintf(stderr,
+            "line_offset 必须是有效的非负整数（支持十进制或十六进制）\n");
+        return 2;
+    }
 
     if (strcmp(mode, "trigger") == 0)
         return test_trigger(chip, line);
